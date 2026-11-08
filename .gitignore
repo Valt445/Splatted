@@ -1,0 +1,31 @@
+# Build output (CMake presets put everything in build/<preset>/, incl. compiled .spv and FetchContent deps)
+build/
+out/
+CMakeUserPresets.json
+
+# Scene assets: multi-GB .glb/.ply files, way over GitHub's 100 MB limit.
+# Keep only the README that explains how to get/convert them.
+assets/*
+!assets/README.md
+
+# Training outputs / datasets if they ever land in the repo
+*.ply
+*.glb
+*.splat
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Debug / capture leftovers
+*.pdb
+*.rdc
+imgui.ini
+
+# OS junk
+Thumbs.db
+desktop.ini
+.DS_Store

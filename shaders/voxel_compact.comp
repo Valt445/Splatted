@@ -1,0 +1,21 @@
+#version 450
+layout(local_size_x = 256) in;
+
+layout(std430, set = 0, binding = 10) readonly  buffer Density { uint density[]; };
+layout(std430, set = 0, binding = 11) writeonly buffer Solid   { uint solid[]; };
+layout(std430, set = 0, binding = 12) buffer Indirect {
+    uint vertex_count; uint instance_count; uint first_vertex; uint first_instance;
+} cmd;
+layout(std430, set = 0, binding = 13) readonly buffer Grid { vec4 origin_size; uvec4 dims; } grid;
+
+void main()
+{
+    uint i     = gl_GlobalInvocationID.x;                    // one thread per CELL (not splat)
+    uint total = grid.dims.x * grid.dims.y * grid.dims.z;
+    if (i >= total) return;
+
+    if (density[i] >= grid.dims.w) {                         // dims.w = threshold (300)
+        uint slot = atomicAdd(cmd.instance_count, 1u);       // returns the OLD value = my slot
+        solid[slot] = i;                                     // write my cell index there
+    }
+}
