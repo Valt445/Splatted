@@ -1,5 +1,3 @@
-// Base implementation. vk-bootstrap is used only inside this file: Base itself
-// stores plain Vulkan handles, nothing from vkb.
 
 #include "base.h"
 #include "check.h"
@@ -10,9 +8,6 @@
 #include <cstdlib>
 #include <cstring>
 
-// ===========================================================================
-// Debug messenger
-// ===========================================================================
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
     VkDebugUtilsMessageSeverityFlagBitsEXT      severity,
     VkDebugUtilsMessageTypeFlagsEXT             type,
@@ -35,7 +30,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
                                                                                 : "general";
 
     std::fprintf(stderr, "[vk %s/%s] %s\n\n", tag, kind, data->pMessage);
-    return VK_FALSE; // never abort the call that triggered the message
+    return VK_FALSE;
 }
 
 static void framebuffer_size_callback(GLFWwindow* window, int, int)
@@ -55,9 +50,6 @@ static const char* present_mode_str(VkPresentModeKHR m)
     }
 }
 
-// ===========================================================================
-// Init steps (each one does exactly one thing)
-// ===========================================================================
 static bool init_window(Base& base, const BaseConfig& cfg)
 {
     if (!glfwInit()) {
@@ -69,8 +61,8 @@ static bool init_window(Base& base, const BaseConfig& cfg)
         return false;
     }
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // Vulkan, not OpenGL
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);     // swapchain is rebuilt on resize
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     std::snprintf(base.title, sizeof(base.title), "%s", cfg.title);
     base.window = glfwCreateWindow((int)cfg.width, (int)cfg.height, base.title, nullptr, nullptr);
@@ -90,14 +82,13 @@ static bool init_instance(Base& base, const BaseConfig& cfg, vkb::Instance& out)
            .set_engine_name("none")
            .require_api_version(1, 3, 0);
 
-    // GLFW tells us which surface extensions this platform (X11/Wayland/Win32) needs.
     uint32_t     ext_count = 0;
     const char** exts      = glfwGetRequiredInstanceExtensions(&ext_count);
     for (uint32_t i = 0; i < ext_count; i++)
         builder.enable_extension(exts[i]);
 
     if (cfg.validation) {
-        builder.enable_validation_layers(true)   // required: fail loudly if missing
+        builder.enable_validation_layers(true)
                .add_validation_feature_enable(VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT)
                .set_debug_callback(debug_callback)
                .set_debug_callback_user_data_pointer(&base)
@@ -135,11 +126,10 @@ static bool init_surface(Base& base)
 
 static bool init_device(Base& base, const vkb::Instance& vkb_instance)
 {
-    // Vulkan 1.3 core features we rely on.
     VkPhysicalDeviceVulkan13Features features13 = {};
     features13.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    features13.dynamicRendering = VK_TRUE;   // no render passes / framebuffers
-    features13.synchronization2 = VK_TRUE;   // vkCmdPipelineBarrier2, vkQueueSubmit2
+    features13.dynamicRendering = VK_TRUE;
+    features13.synchronization2 = VK_TRUE;
 
     vkb::PhysicalDeviceSelector selector{vkb_instance};
     auto phys = selector.set_minimum_version(1, 3)
@@ -163,7 +153,6 @@ static bool init_device(Base& base, const vkb::Instance& vkb_instance)
     base.gpu_props       = d.physical_device.properties;
     base.device          = d.device;
 
-    // One queue does everything: graphics + compute + transfer + present.
     auto queue_index = d.get_queue_index(vkb::QueueType::graphics);
     auto queue       = d.get_queue(vkb::QueueType::graphics);
     if (!queue_index || !queue) {
@@ -202,9 +191,6 @@ static bool init_allocator(Base& base)
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Swapchain + depth + per-image semaphores (created together, rebuilt together)
-// ---------------------------------------------------------------------------
 static void create_depth(Base& base)
 {
     VkImageCreateInfo image = {};
@@ -235,12 +221,11 @@ static void create_depth(Base& base)
 
 static bool create_swapchain(Base& base, VkSwapchainKHR old_swapchain)
 {
-    // Framebuffer size can differ from window size on HiDPI screens.
     int fb_w = 0, fb_h = 0;
     glfwGetFramebufferSize(base.window, &fb_w, &fb_h);
 
     VkSurfaceFormatKHR format = {};
-    format.format     = VK_FORMAT_B8G8R8A8_UNORM;          // colors land on screen exactly as written
+    format.format     = VK_FORMAT_B8G8R8A8_UNORM;
     format.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
     auto result = vkb::SwapchainBuilder{base.physical_device, base.device, base.surface,
@@ -306,7 +291,7 @@ static void rebuild_swapchain(Base& base)
 {
     int w = 0, h = 0;
     glfwGetFramebufferSize(base.window, &w, &h);
-    if (w == 0 || h == 0) return;   // minimized: try again later
+    if (w == 0 || h == 0) return;
 
     vkDeviceWaitIdle(base.device);
 
@@ -337,7 +322,7 @@ static void init_frames(Base& base)
         VK_CHECK(vkAllocateCommandBuffers(base.device, &alloc, &f.cmd));
 
         VkFenceCreateInfo fence = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;   // first wait passes immediately
+        fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         VK_CHECK(vkCreateFence(base.device, &fence, nullptr, &f.in_flight));
 
         VkSemaphoreCreateInfo sem = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -372,9 +357,6 @@ static void print_summary(const Base& base, const BaseConfig& cfg)
     std::fflush(stdout);
 }
 
-// ===========================================================================
-// Public API: lifetime
-// ===========================================================================
 bool base_init(Base& base, const BaseConfig& cfg)
 {
     vkb::Instance vkb_instance;
@@ -388,7 +370,7 @@ bool base_init(Base& base, const BaseConfig& cfg)
     if (!create_swapchain(base, VK_NULL_HANDLE))  return false;
     init_frames(base);
 
-    
+
     base.time = glfwGetTime();
     print_summary(base, cfg);
     return true;
@@ -429,9 +411,6 @@ void base_shutdown(Base& base)
     base = Base{};
 }
 
-// ===========================================================================
-// Public API: per frame
-// ===========================================================================
 bool base_poll(Base& base)
 {
     glfwPollEvents();
@@ -441,7 +420,7 @@ bool base_poll(Base& base)
     double now = glfwGetTime();
     double dt  = now - base.time;
     base.time  = now;
-    base.dt    = (float)(dt > 0.1 ? 0.1 : dt);   // clamp so a hitch doesn't teleport things
+    base.dt    = (float)(dt > 0.1 ? 0.1 : dt);
 
     base.fps_timer += dt;
     base.fps_frames++;
@@ -461,7 +440,7 @@ bool base_begin_frame(Base& base, BaseFrame& frame)
 {
     int w = 0, h = 0;
     glfwGetFramebufferSize(base.window, &w, &h);
-    if (w == 0 || h == 0) {             // minimized: don't spin the CPU
+    if (w == 0 || h == 0) {
         glfwWaitEventsTimeout(0.1);
         return false;
     }
@@ -492,15 +471,12 @@ bool base_begin_frame(Base& base, BaseFrame& frame)
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(f.cmd, &begin));
 
-    // Swapchain image: contents don't matter (we clear), so from UNDEFINED.
-    // Waits on the acquire semaphore at COLOR_ATTACHMENT_OUTPUT (see end_frame).
     base_image_barrier(f.cmd, base.swapchain_images[image_index], VK_IMAGE_ASPECT_COLOR_BIT,
                        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT);
 
-    // Depth is shared by all frames in flight: wait for the previous frame's depth writes.
     const VkPipelineStageFlags2 depth_stages = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
                                                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
     base_image_barrier(f.cmd, base.depth_image, VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -560,8 +536,7 @@ void base_end_frame(Base& base, const BaseFrame& frame)
     base_image_barrier(frame.cmd, frame.image, VK_IMAGE_ASPECT_COLOR_BIT,
                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0);   // keeps the layout transition inside
-                                                                   // the render_finished signal's scope
+                       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0);
     VK_CHECK(vkEndCommandBuffer(frame.cmd));
 
     VkSemaphoreSubmitInfo wait = {VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
@@ -593,23 +568,20 @@ void base_end_frame(Base& base, const BaseFrame& frame)
 
     VkResult r = vkQueuePresentKHR(base.queue, &present);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR)
-        base.resized = true;            // rebuilt at the start of the next frame
+        base.resized = true;
     else
         VK_CHECK(r);
 
     base.frame_number++;
 }
 
-// ===========================================================================
-// Public API: buffers
-// ===========================================================================
 BaseBuffer base_create_buffer(const Base& base, VkDeviceSize size, VkBufferUsageFlags usage, bool host_visible)
 {
     VkBufferCreateInfo info = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     info.size  = size;
     info.usage = usage;
     if (!host_visible)
-        info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;   // so base_upload can fill it
+        info.usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
     VmaAllocationCreateInfo alloc = {};
     if (host_visible) {
@@ -657,7 +629,6 @@ void base_upload(Base& base, const BaseBuffer& dst, const void* data, VkDeviceSi
     VkBufferCopy copy = {0, dst_offset, size};
     vkCmdCopyBuffer(cmd, staging.buffer, dst.buffer, 1, &copy);
 
-    // Make the copy visible to everything submitted after this.
     base_memory_barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT);
     VK_CHECK(vkEndCommandBuffer(cmd));
@@ -675,9 +646,6 @@ void base_upload(Base& base, const BaseBuffer& dst, const void* data, VkDeviceSi
     base_destroy_buffer(base, staging);
 }
 
-// ===========================================================================
-// Public API: barriers
-// ===========================================================================
 void base_image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
                         VkImageLayout old_layout, VkImageLayout new_layout,
                         VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
@@ -717,9 +685,6 @@ void base_memory_barrier(VkCommandBuffer cmd,
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-// ===========================================================================
-// Public API: shaders
-// ===========================================================================
 VkShaderModule base_load_shader(const Base& base, const char* name)
 {
     char path[512];

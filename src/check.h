@@ -1,6 +1,4 @@
 #pragma once
-// Tiny error-checking helpers. No exceptions: a failed Vulkan call is a bug,
-// so we print where it happened and abort immediately.
 
 #include <vulkan/vulkan.h>
 #include <cstdio>

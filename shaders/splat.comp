@@ -9,14 +9,14 @@ layout(push_constant) uniform Push { uint count; uint n_pad; uint j; uint k; } p
 
 void main()
 {
-    uint i = gl_GlobalInvocationID.x;        // my thread = my splat
-    if (i >= pc.n_pad) return;               // past the end of the padded array
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.n_pad) return;
 
-    if (i < pc.count) {                      // real splat
+    if (i < pc.count) {
         vec3 p = vec3(positions[3*i], positions[3*i+1], positions[3*i+2]);
-        keys[i]    = (ubo.view * vec4(p, 1.0)).z;   // depth: more negative = farther
+        keys[i]    = (ubo.view * vec4(p, 1.0)).z;
         indices[i] = i;
-    } else {                                 // padding
+    } else {
         keys[i]    = 3.0e38;
         indices[i] = 0;
     }

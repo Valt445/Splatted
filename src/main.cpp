@@ -2,8 +2,8 @@
 #include "base.h"
 #include "camera.h"
 #include "check.h"
-#include "splat.h"            // GaussianSplat, SplatUBO, splat_load_file, splat_destroy, draw_gaussian_splats
-#include "splat_pipeline.h"   // SplatPipeline, create_splat_pipeline, destroy_splat_pipeline
+#include "splat.h"
+#include "splat_pipeline.h"
 #include <GLFW/glfw3.h>
 #include <cstdlib>
 #include <cstring>
@@ -12,65 +12,55 @@ static void record_depth_pass(VkCommandBuffer cmd, const SplatPipeline& pipe, Vk
     uint32_t count, uint32_t n_pad, const PhysicsPush& phys,
     bool build_voxels, VkBuffer voxel_density, uint32_t voxel_total, VkBuffer voxel_indirect)
 {
-    // 1. Last frame's draw may still be reading the sort buffers: wait before overwriting them
     base_memory_barrier(cmd,
         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
-    // 2. Bind the set once for all compute work
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.layout, 0, 1, &set, 0, nullptr);
 
-    // 3. PHYSICS: move awake splats (one thread per real splat)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.physics_pipeline);
     vkCmdPushConstants(cmd, pipe.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(phys), &phys);
     vkCmdDispatch(cmd, (count + 255) / 256, 1, 1);
 
-    // everything after must see the moved positions
     base_memory_barrier(cmd,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
         VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
-    // 4. VOXELIZE: only when asked (first frame, later on a key)
     if (build_voxels) {
-        vkCmdFillBuffer(cmd, voxel_density, 0, VK_WHOLE_SIZE, 0);            // density = 0
-        VkDrawIndirectCommand reset = { 36, 0, 0, 0 };                        // 36 verts per cube, 0 cubes
+        vkCmdFillBuffer(cmd, voxel_density, 0, VK_WHOLE_SIZE, 0);
+        VkDrawIndirectCommand reset = { 36, 0, 0, 0 };
         vkCmdUpdateBuffer(cmd, voxel_indirect, 0, sizeof(reset), &reset);
 
-        base_memory_barrier(cmd,                                              // clears -> compute
+        base_memory_barrier(cmd,
             VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
-        // voxelize (as before)
         SortPush vp = { count, 0, 0, 0 };
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.voxelize_pipeline);
         vkCmdPushConstants(cmd, pipe.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(vp), &vp);
         vkCmdDispatch(cmd, (count + 255) / 256, 1, 1);
 
-        base_memory_barrier(cmd,                                              // voxelize -> compact
+        base_memory_barrier(cmd,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
-        // compact: one thread per cell
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.compact_pipeline);
         vkCmdDispatch(cmd, (voxel_total + 255) / 256, 1, 1);
 
-        // the debug draw reads the list (vertex shader) and the count (indirect stage)
         base_memory_barrier(cmd,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
             VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
             VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     }
 
-    // 5. DEPTH: key + index per (padded) slot
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.compute_pipeline);
     SortPush pc = { count, n_pad, 0, 0 };
     vkCmdPushConstants(cmd, pipe.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
     vkCmdDispatch(cmd, (n_pad + 255) / 256, 1, 1);
 
-    // 6. BITONIC SORT (its first barrier also covers depth -> sort)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.sort_pipeline);
     for (uint32_t k = 2; k <= n_pad; k <<= 1) {
         for (uint32_t j = k >> 1; j > 0; j >>= 1) {
@@ -86,7 +76,6 @@ static void record_depth_pass(VkCommandBuffer cmd, const SplatPipeline& pipe, Vk
         }
     }
 
-    // 7. The draw must see the compute writes
     base_memory_barrier(cmd,
         VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
         VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
@@ -98,12 +87,12 @@ int main(int argc, char** argv)
     std::printf("[main] build check v2\n");
     BaseConfig cfg;
     uint64_t   max_frames = 0;
-    glm::vec3 rotate_deg(23.4f, 0.0f, 0.0f);              // <- add
+    glm::vec3 rotate_deg(23.4f, 0.0f, 0.0f);
     for (int i = 1; i < argc; i++) {
         if (std::strcmp(argv[i], "--bench") == 0)                 cfg.present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
         if (std::strcmp(argv[i], "--no-validation") == 0)         cfg.validation = false;
         if (std::strcmp(argv[i], "--frames") == 0 && i + 1 < argc) max_frames = std::strtoull(argv[++i], nullptr, 10);
-        if (std::strcmp(argv[i], "--rot") == 0 && i + 3 < argc) {      // <- add
+        if (std::strcmp(argv[i], "--rot") == 0 && i + 3 < argc) {
             rotate_deg.x = std::strtof(argv[++i], nullptr);
             rotate_deg.y = std::strtof(argv[++i], nullptr);
             rotate_deg.z = std::strtof(argv[++i], nullptr);
@@ -116,11 +105,7 @@ int main(int argc, char** argv)
 
     Camera camera;
     camera.speed = 5.0f;
-    // ---------------------------------------------------------------------
-    // Init
-    // ---------------------------------------------------------------------
 
-    // Scene: the 5 attribute buffers on the GPU
     GaussianSplat splat;
     if (!splat_load_file(base, ASSET_DIR "/playroom.glb", splat, rotate_deg))
         return 1;
@@ -139,21 +124,18 @@ int main(int argc, char** argv)
     BaseBuffer awake = base_create_buffer(base, splat.splat_count * sizeof(uint32_t),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false);
 
-    std::vector<uint32_t> zeros(splat.splat_count, 0);          // everyone starts asleep
+    std::vector<uint32_t> zeros(splat.splat_count, 0);
     base_upload(base, awake, zeros.data(), zeros.size() * sizeof(uint32_t), 0);
-    // Pipeline: shaders + all the render state
     SplatPipeline pipe;
     if (!create_splat_pipeline(base, pipe))
         return 1;
 
-    
 
-    // One camera UBO per frame in flight (CPU-writable, persistently mapped)
+
     BaseBuffer ubo[BASE_FRAMES_IN_FLIGHT];
     for (uint32_t i = 0; i < BASE_FRAMES_IN_FLIGHT; i++)
         ubo[i] = base_create_buffer(base, sizeof(SplatUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
 
-    // Descriptor pool: room for one uniform-buffer set per frame in flight
     VkDescriptorPoolSize pool_sizes[2] = {
      { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BASE_FRAMES_IN_FLIGHT },
      { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BASE_FRAMES_IN_FLIGHT * 13 },
@@ -165,7 +147,6 @@ int main(int argc, char** argv)
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
     VK_CHECK(vkCreateDescriptorPool(base.device, &pool_info, nullptr, &descriptor_pool));
 
-    // Allocate the sets (all with the pipeline's set layout)
     VkDescriptorSetLayout layouts[BASE_FRAMES_IN_FLIGHT];
     for (uint32_t i = 0; i < BASE_FRAMES_IN_FLIGHT; i++)
         layouts[i] = pipe.set_layout;
@@ -177,9 +158,6 @@ int main(int argc, char** argv)
     VkDescriptorSet sets[BASE_FRAMES_IN_FLIGHT];
     VK_CHECK(vkAllocateDescriptorSets(base.device, &alloc_info, sets));
 
-    // Grid: longest axis gets 128 cells, plus a 1-cell margin on every side
-    // Grid: longest axis gets 128 cells, plus a 1-cell margin on every side
-    // Grid: longest axis gets 128 cells, plus a 1-cell margin on every side
     glm::vec3 extent = splat.bounds_max - splat.bounds_min;
     float     vsize = glm::max(extent.x, glm::max(extent.y, extent.z)) / 128.0f;
 
@@ -201,21 +179,20 @@ int main(int argc, char** argv)
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false);
     base_upload(base, voxel_grid, &grid, sizeof(grid), 0);
 
-    // Point each set's binding 0 at its frame's UBO
     VkBuffer storage[13] = {
-    splat.position_buffer.buffer,   // binding 1
-    splat.rotation_buffer.buffer,   // binding 2
-    splat.scale_buffer.buffer,      // binding 3
-    splat.opacity_buffer.buffer,    // binding 4
-    splat.color_buffer.buffer,      // binding 5
-    sort_keys.buffer,               // binding 6
-    sort_indices.buffer,            // binding 7
-    prev_positions.buffer,          // binding 8
-    awake.buffer,                    // binding 9
-    voxel_density.buffer,                // 10
-    voxel_solid.buffer,                  // 11
-    voxel_indirect.buffer,               // 12
-    voxel_grid.buffer,                   // 13
+    splat.position_buffer.buffer,
+    splat.rotation_buffer.buffer,
+    splat.scale_buffer.buffer,
+    splat.opacity_buffer.buffer,
+    splat.color_buffer.buffer,
+    sort_keys.buffer,
+    sort_indices.buffer,
+    prev_positions.buffer,
+    awake.buffer,
+    voxel_density.buffer,
+    voxel_solid.buffer,
+    voxel_indirect.buffer,
+    voxel_grid.buffer,
 
     };
 
@@ -239,14 +216,11 @@ int main(int argc, char** argv)
         vkUpdateDescriptorSets(base.device, 14, writes, 0, nullptr);
     }
 
-    // ---------------------------------------------------------------------
-    // Frame loop
-    // ---------------------------------------------------------------------
     while (base_poll(base)) {
         camera_update(camera, base.window, base.dt);
 
-        static glm::vec3 tune_deg(0.0f);           // live tilt angles
-        float step = 20.0f * base.dt;              // 20 degrees per second while held
+        static glm::vec3 tune_deg(0.0f);
+        float step = 20.0f * base.dt;
         if (glfwGetKey(base.window, GLFW_KEY_I) == GLFW_PRESS) tune_deg.x += step;
         if (glfwGetKey(base.window, GLFW_KEY_K) == GLFW_PRESS) tune_deg.x -= step;
         if (glfwGetKey(base.window, GLFW_KEY_J) == GLFW_PRESS) tune_deg.z += step;
@@ -260,7 +234,6 @@ int main(int argc, char** argv)
         if (!base_begin_frame(base, frame))
             continue;
 
-        // Camera data for this frame (frame exists only from here on)
         SplatUBO u;
         u.projection = camera_proj(camera, frame.extent);
         u.view = camera_view(camera);
@@ -269,26 +242,26 @@ int main(int argc, char** argv)
         u.focal_x = focal.x;
         u.focal_y = focal.y;
         std::memcpy(ubo[frame.frame_index].mapped, &u, sizeof(u));
-        
+
         static bool b_was_down = false;
         bool b_down = glfwGetKey(base.window, GLFW_KEY_B) == GLFW_PRESS;
-        bool blast = b_down && !b_was_down;          // fire once per press, not every frame
+        bool blast = b_down && !b_was_down;
         b_was_down = b_down;
 
-        glm::vec3 center = camera.position + camera_forward(camera) * 2.0f;   // 2 m in front of you
+        glm::vec3 center = camera.position + camera_forward(camera) * 2.0f;
 
         PhysicsPush phys = {};
         phys.count = splat.splat_count;
-        phys.dt = glm::min(base.dt, 1.0f / 30.0f);   // clamp: a long frame would explode things
+        phys.dt = glm::min(base.dt, 1.0f / 30.0f);
         phys.floor_y = splat.floor_y;
-        phys.damping = 0.999f;                            // a little air drag
-        phys.blast = glm::vec4(center, 0.8f);           // 0.8 m radius
+        phys.damping = 0.999f;
+        phys.blast = glm::vec4(center, 0.8f);
         phys.strength = 6.0f;
         phys.do_blast = blast ? 1u : 0u;
         phys.gravity = 9.81f;
 
         static bool voxels_built = false;
-        bool build = !voxels_built || blast;  
+        bool build = !voxels_built || blast;
         voxels_built = true;
 
         record_depth_pass(frame.cmd, pipe, sets[frame.frame_index], splat.splat_count, n_pad, phys,
@@ -314,7 +287,7 @@ int main(int argc, char** argv)
         if (h_down && !h_was_down) show_splats = !show_splats;
         h_was_down = h_down;
 
-       
+
 
         base_end_rendering(frame);
 
@@ -326,10 +299,7 @@ int main(int argc, char** argv)
 
     vkDeviceWaitIdle(base.device);
 
-    // ---------------------------------------------------------------------
-    // Cleanup (reverse order)
-    // ---------------------------------------------------------------------
-    vkDestroyDescriptorPool(base.device, descriptor_pool, nullptr);   // frees the sets too
+    vkDestroyDescriptorPool(base.device, descriptor_pool, nullptr);
     for (uint32_t i = 0; i < BASE_FRAMES_IN_FLIGHT; i++)
         base_destroy_buffer(base, ubo[i]);
     base_destroy_buffer(base, sort_indices);

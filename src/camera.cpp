@@ -16,12 +16,11 @@ glm::vec3 camera_forward(const Camera& cam)
 
 void camera_update(Camera& cam, GLFWwindow* window, float dt)
 {
-    // ---- Look: hold right mouse ----
     bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
     double x = 0.0, y = 0.0;
     glfwGetCursorPos(window, &x, &y);
 
-    if (rmb && !cam.looking) {                 // just started: no jump on first frame
+    if (rmb && !cam.looking) {
         cam.looking = true;
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         glfwGetCursorPos(window, &x, &y);
@@ -40,7 +39,6 @@ void camera_update(Camera& cam, GLFWwindow* window, float dt)
         cam.last_y = y;
     }
 
-    // ---- Move ----
     const glm::vec3 world_up = {0.0f, 1.0f, 0.0f};
     glm::vec3 forward = camera_forward(cam);
     glm::vec3 right   = glm::normalize(glm::cross(forward, world_up));
@@ -71,13 +69,12 @@ glm::mat4 camera_proj(const Camera& cam, VkExtent2D extent)
 {
     float     aspect = (float)extent.width / (float)extent.height;
     glm::mat4 proj   = glm::perspective(glm::radians(cam.fov_y), aspect, cam.z_near, cam.z_far);
-    proj[1][1] *= -1.0f;   // Vulkan clip space has +Y pointing down
+    proj[1][1] *= -1.0f;
     return proj;
 }
 
 glm::vec2 camera_focal(const Camera& cam, VkExtent2D extent)
 {
-    // Square pixels: same focal length on both axes.
     float fy = (float)extent.height / (2.0f * std::tan(glm::radians(cam.fov_y) * 0.5f));
     return {fy, fy};
 }

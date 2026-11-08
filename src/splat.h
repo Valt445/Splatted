@@ -4,12 +4,11 @@ enum SplatKernel { SPLAT_KERNEL_ELLIPSE, SPLAT_KERNEL_SPHERE };
 enum SplatColorSpace { SPLAT_COLOR_SRGB, SPLAT_COLOR_LINEAR };
 
 struct GaussianSplat {
-    BaseBuffer position_buffer;   // vec3 per splat
-    BaseBuffer rotation_buffer;   // vec4 per splat (x, y, z, w)
-    BaseBuffer scale_buffer;      // vec3 per splat (linear)
-    BaseBuffer opacity_buffer;    // float per splat (already sigmoid-applied)
-    BaseBuffer color_buffer;      // vec3 per splat (final color, 0..1)
-  // vec3 per splat (previous position, for velocity)
+    BaseBuffer position_buffer;
+    BaseBuffer rotation_buffer;
+    BaseBuffer scale_buffer;
+    BaseBuffer opacity_buffer;
+    BaseBuffer color_buffer;
     uint32_t   splat_count = 0;
 
     uint32_t        sh_degree = 0;

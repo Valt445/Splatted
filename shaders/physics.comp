@@ -12,17 +12,17 @@ layout(push_constant) uniform Push {
     vec4 blast; float strength; uint do_blast; float gravity; float pad;
 } pc;
 
-const float BOUNCE    = 0.75;    // 0 = thud, 1 = superball
-const float FRICTION  = 0.85;    // sideways speed kept per bounce (1 = ice)
-const float SLEEP_VEL = 0.002;   // per-step speed below which a grounded ball stops
+const float BOUNCE    = 0.75;
+const float FRICTION  = 0.85;
+const float SLEEP_VEL = 0.002;
 
 bool solid_at(vec3 p)
 {
     ivec3 c = ivec3(floor((p - grid.origin_size.xyz) / grid.origin_size.w));
     if (any(lessThan(c, ivec3(0))) || any(greaterThanEqual(c, ivec3(grid.dims.xyz))))
-        return false;                                       // outside the grid = empty
+        return false;
     uint idx = uint(c.x) + uint(c.y) * grid.dims.x + uint(c.z) * grid.dims.x * grid.dims.y;
-    return density[idx] >= grid.dims.w;                     // same rule as compaction
+    return density[idx] >= grid.dims.w;
 }
 
 void main()
@@ -33,7 +33,6 @@ void main()
     vec3 x      = vec3(positions[3*i], positions[3*i+1], positions[3*i+2]);
     vec3 x_prev = vec3(prev[3*i],      prev[3*i+1],      prev[3*i+2]);
 
-    // ---- blast: wake splats in the sphere and kick them outward ----
     if (pc.do_blast != 0u) {
         vec3  d = x - pc.blast.xyz;
         float r = length(d);
@@ -44,37 +43,31 @@ void main()
         }
     }
 
-    if (awake[i] == 0u) return;                             // static world stays put
-    awake[i] = min(awake[i] + 1u, 100000u);                 // age in frames
+    if (awake[i] == 0u) return;
+    awake[i] = min(awake[i] + 1u, 100000u);
 
-    // ---- Verlet step ----
-    vec3 v      = (x - x_prev) * pc.damping;                // velocity (distance per step)
-    vec3 p      = x;                                        // start of this step
+    vec3 v      = (x - x_prev) * pc.damping;
+    vec3 p      = x;
     vec3 target = x + v + vec3(0.0, -pc.gravity, 0.0) * pc.dt * pc.dt;
-    v = target - p;                                         // include gravity in v
+    v = target - p;
 
-    // ---- voxel collision ----
     bool grounded = false;
 
     if (solid_at(p)) {
-        // Started inside solid (spawned in a wall/floor): move freely, nudge up if still stuck
         p = target;
         if (solid_at(p)) p.y += grid.origin_size.w;
     } else {
-        // X axis
         if (solid_at(vec3(target.x, p.y, p.z))) {
             v.x = -v.x * BOUNCE;  v.y *= FRICTION;  v.z *= FRICTION;
         } else {
             p.x = target.x;
         }
-        // Y axis (floor / ceiling)
         if (solid_at(vec3(p.x, target.y, p.z))) {
             v.y = -v.y * BOUNCE;  v.x *= FRICTION;  v.z *= FRICTION;
             grounded = true;
         } else {
             p.y = target.y;
         }
-        // Z axis
         if (solid_at(vec3(p.x, p.y, target.z))) {
             v.z = -v.z * BOUNCE;  v.x *= FRICTION;  v.y *= FRICTION;
         } else {
@@ -82,20 +75,18 @@ void main()
         }
     }
 
-    // ---- sleep: resting balls stop buzzing ----
     if (grounded && length(v) < SLEEP_VEL)
         v = vec3(0.0);
 
     x = p;
 
-    // ---- safety net: never fall below the floor plane ----
     if (x.y < pc.floor_y) {
         x.y = pc.floor_y;
-        v.y = abs(v.y) * BOUNCE;                            // always bounce UP
+        v.y = abs(v.y) * BOUNCE;
         v.x *= FRICTION;  v.z *= FRICTION;
     }
 
-    x_prev = x - v;                                         // Verlet: velocity = x - x_prev
+    x_prev = x - v;
 
     positions[3*i]   = x.x;  positions[3*i+1] = x.y;  positions[3*i+2] = x.z;
     prev[3*i]        = x_prev.x;  prev[3*i+1] = x_prev.y;  prev[3*i+2] = x_prev.z;
