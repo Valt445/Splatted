@@ -43,6 +43,7 @@ struct BaseBuffer {
     VkBuffer      buffer     = VK_NULL_HANDLE;
     VmaAllocation allocation = VK_NULL_HANDLE;
     void*         mapped     = nullptr;
+	VkDeviceSize  size = 0;
 };
 
 struct Base {
